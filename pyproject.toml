@@ -15,6 +15,13 @@ dependencies = [
     "sqlalchemy>=2.0.0",        # Database ORM
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
+    "transformers>=4.0.0",      # For Timer model
+    "einops",                   # Tensor operations
+    "scipy",                    # Scientific computing
+    "sktime",                   # Time series analysis
+    "reformer-pytorch",         # Reformer architecture
+    "patool",                   # Archive management
+    "sympy",                    # Symbolic mathematics
 ]
 
 [project.optional-dependencies]

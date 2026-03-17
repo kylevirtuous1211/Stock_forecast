@@ -22,3 +22,18 @@ async def get_historical_data(request: HistoricalRequest):
 @router.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@router.get("/tracked-stocks", response_model=List[str])
+async def get_tracked_stocks():
+    # symbols from model/fetch_sector_data.py
+    symbols = ["XLK", "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "ADBE", "CRM", "AMD", "QCOM", "TXN"]
+    return symbols
+
+@router.get("/index-performance", response_model=Dict[str, Any])
+async def get_index_performance(lookback_minutes: int = 60):
+    try:
+        # Fetch data for XLK
+        data = fetch_historical_data(["XLK"], lookback_minutes)
+        return {"data": data.get("XLK", [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
