@@ -64,7 +64,7 @@ while current_start < end_date:
         print(f"Error fetching chunk: {e}")
         
     current_start = current_end
-
+    
 if all_dfs:
     df_pivot = pd.concat(all_dfs)
     df_pivot.sort_index(inplace=True)

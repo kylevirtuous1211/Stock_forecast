@@ -255,7 +255,7 @@ def main():
     exp = Exp_Sector_Finetune(args)
     setting = 'Timer_Finetune_Sector_{}'.format(args.pred_len)
     
-    print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
+    print('>>>>>>> start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
     exp.finetune(setting)
 
 if __name__ == "__main__":

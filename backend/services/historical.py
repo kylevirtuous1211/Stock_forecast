@@ -22,25 +22,35 @@ def fetch_historical_data(symbols: List[str], lookback_minutes: int = 96, end_ti
     Fetches historical bars for the given symbols.
     """
     if end_time is None:
-        end_time = datetime.utcnow()
-    # Fetch a bit more to ensure we have enough after alignment/filling
-    start_time = end_time - timedelta(minutes=lookback_minutes * 2) 
+        # Alpaca free tier has a 15-minute delay for IEX data.
+        # Requesting data up to 'now' often returns 403 or empty data.
+        end_time = datetime.utcnow() - timedelta(minutes=16)
+    
+    # Lookback 7 days to guarantee we hit active trading sessions (weekends, holidays)
+    # Then we will take the most recent 'lookback_minutes' bars
+    start_time = end_time - timedelta(days=7)
 
     request_params = StockBarsRequest(
         symbol_or_symbols=symbols,
         timeframe=TimeFrame.Minute,
         start=start_time,
-        end=end_time
+        end=end_time,
+        limit=20000, # Large limit to prevent many pagination roundtrips
+        feed="iex"
     )
 
-    bars = client.get_stock_bars(request_params)
-    
-    # Convert to DataFrame
-    df = bars.df
+    try:
+        bars = client.get_stock_bars(request_params)
+        df = bars.df
+    except Exception as e:
+        print(f"Error fetching historical data from Alpaca: {e}")
+        # Return empty structure on error to prevent 500
+        return {symbol: [] for symbol in symbols}
     
     result = {}
     
-    if df.empty:
+    if df is None or df.empty:
+        print(f"No historical data found for {symbols} between {start_time} and {end_time}")
         for symbol in symbols:
             result[symbol] = []
         return result
@@ -64,6 +74,12 @@ def fetch_historical_data(symbols: List[str], lookback_minutes: int = 96, end_ti
     for symbol in symbols:
         if 'symbol' in df.columns:
             symbol_data = df[df['symbol'] == symbol].copy()
+            
+            # Sort chronologically and keep only the latest requested bars
+            if 'timestamp' in symbol_data.columns:
+                symbol_data.sort_values(by='timestamp', inplace=True)
+            symbol_data = symbol_data.tail(lookback_minutes)
+            
             # Convert timestamp to string for JSON serialization
             if 'timestamp' in symbol_data.columns:
                 symbol_data['timestamp'] = symbol_data['timestamp'].apply(lambda x: x.isoformat() if hasattr(x, 'isoformat') else str(x))
