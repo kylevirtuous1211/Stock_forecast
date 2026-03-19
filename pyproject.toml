@@ -22,6 +22,9 @@ dependencies = [
     "reformer-pytorch",         # Reformer architecture
     "patool",                   # Archive management
     "sympy",                    # Symbolic mathematics
+    "matplotlib>=3.10.8",
+    "huggingface-hub>=1.7.1",
+    "safetensors>=0.7.0",
 ]
 
 [project.optional-dependencies]

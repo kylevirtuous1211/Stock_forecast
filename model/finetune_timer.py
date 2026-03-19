@@ -112,7 +112,7 @@ class Exp_Sector_Finetune(Exp_Forecast):
             os.makedirs(path)
 
         train_steps = len(finetune_loader)
-        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
+        early_stopping = EarlyStopping(patience=self.args.early_stop_patience, verbose=True)
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
 
@@ -137,6 +137,10 @@ class Exp_Sector_Finetune(Exp_Forecast):
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
+                # Apply augmentation if enabled
+                if self.args.augment:
+                    noise = torch.randn_like(batch_x) * 0.01
+                    batch_x = batch_x + noise
 
                 # Decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
@@ -150,13 +154,17 @@ class Exp_Sector_Finetune(Exp_Forecast):
                 batch_y_target = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                 
                 loss = criterion(outputs, batch_y_target)
-                train_loss.append(loss.item())
+                loss = loss / self.args.accum_iter
+                train_loss.append(loss.item() * self.args.accum_iter)
                 
                 loss.backward()
-                model_optim.step()
+                
+                if (i + 1) % self.args.accum_iter == 0:
+                    model_optim.step()
+                    model_optim.zero_grad()
                 
                 if (i + 1) % 100 == 0:
-                     print(f"\titer: {i+1}, epoch: {epoch+1} | loss: {loss.item():.7f}")
+                     print(f"\titer: {i+1}, epoch: {epoch+1} | loss: {loss.item() * self.args.accum_iter:.7f}")
 
             print(f"Epoch: {epoch+1} cost time: {time.time() - epoch_time}")
             train_loss_avg = np.average(train_loss)
@@ -193,63 +201,74 @@ class Exp_Sector_Finetune(Exp_Forecast):
         return self.model
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Timer Sector Finetuning')
     
-    # Defaults for Timer
+    # Data Paths
     parser.add_argument('--root_path', type=str, default='./model', help='root path of the data file')
     parser.add_argument('--data_path', type=str, default='sector_data.csv', help='data file')
     parser.add_argument('--checkpoints', type=str, default='./model/checkpoints/', help='location of model checkpoints')
     parser.add_argument('--pretrained_weight_path', type=str, default='', help='path to pretrained weights')
-    parser.add_argument('--ckpt_path', type=str, default='', help='ckpt file')
+    parser.add_argument('--ckpt_path', type=str, default='', help='optional path to a specific .pth file')
     
-    parser.add_argument('--task_name', type=str, default='forecast')
-    parser.add_argument('--model', type=str, default='Timer')
-    parser.add_argument('--data', type=str, default='custom')
-    parser.add_argument('--features', type=str, default='M')
-    parser.add_argument('--target', type=str, default='XLK')
-    parser.add_argument('--freq', type=str, default='t', help='minutely')
+    # Training Levers
+    parser.add_argument('--seq_len', type=int, default=672, help='input sequence length (multiples of 96 recommended)')
+    parser.add_argument('--label_len', type=int, default=336, help='start token length')
+    parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
+    parser.add_argument('--batch_size', type=int, default=16, help='batch size of training input data')
+    parser.add_argument('--train_epochs', type=int, default=10, help='train epochs')
+    parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
+    parser.add_argument('--train_layers_last', type=int, default=2, help='number of decoder layers to train (from end)')
+    parser.add_argument('--accum_iter', type=int, default=1, help='gradient accumulation steps')
+    parser.add_argument('--augment', action='store_true', help='apply Gaussian noise augmentation to training data')
+    parser.add_argument('--early_stop_patience', type=int, default=3, help='patience for early stopping')
     
-    parser.add_argument('--seq_len', type=int, default=672) # e.g. 1-2 days context? 96 is standard. User said 5 years data. 
-    # Timer large model often uses larger context. Let's stick to standard 672 (approx 1.5 days of trading? no, trading day is Only 6.5 hours. 390 mins. 672 is ~1.7 days)
-    parser.add_argument('--label_len', type=int, default=336)
-    parser.add_argument('--pred_len', type=int, default=96)
-    
-    # Model config (must match pre-trained Timer-base-84m)
-    parser.add_argument('--d_model', type=int, default=512) 
-    parser.add_argument('--patch_len', type=int, default=96)
-    parser.add_argument('--e_layers', type=int, default=6) 
-    parser.add_argument('--d_layers', type=int, default=6)
-    parser.add_argument('--n_heads', type=int, default=8)
-    parser.add_argument('--d_ff', type=int, default=2048)
-    parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--factor', type=int, default=1)
-    parser.add_argument('--activation', type=str, default='gelu')
-    parser.add_argument('--output_attention', action='store_true')
-    parser.add_argument('--embed', type=str, default='timeF')
-    
-    parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--train_epochs', type=int, default=10)
-    parser.add_argument('--patience', type=int, default=3)
-    parser.add_argument('--learning_rate', type=float, default=0.0001)
-    parser.add_argument('--lradj', type=str, default='type1')
-    parser.add_argument('--use_gpu', type=bool, default=True)
-    parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--use_multi_gpu', action='store_true')
-    parser.add_argument('--local_rank', type=int, default=0)
-    
-    parser.add_argument('--train_layers_last', type=int, default=2, help='Number of last layers to train')
-    parser.add_argument('--use_ims', action='store_true')
-    parser.add_argument('--loss', type=str, default='MSE')
+    # Optimization
+    parser.add_argument('--loss', type=str, default='MSE', help='loss function')
     parser.add_argument('--use_weight_decay', action='store_true', help='use weight decay')
-    parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay')
+    parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay value')
     
+    # Hardware / Speed
+    parser.add_argument('--use_gpu', type=lambda x: (str(x).lower() == 'true'), default=True, help='use gpu')
+    parser.add_argument('--gpu', type=int, default=0, help='gpu id')
+    parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
+
     args = parser.parse_args()
     
-    # Hardcode some for Timer compatibility if not passed
+    # Hardcoded/Fixed Parameters for Timer-base-84m
+    # These must match the pretrained model architecture
+    fixed_params = {
+        'task_name': 'forecast',
+        'model': 'Timer',
+        'data': 'custom',
+        'features': 'M',
+        'target': 'XLK',
+        'freq': 't',
+        'd_model': 512,
+        'patch_len': 96,
+        'e_layers': 6,
+        'd_layers': 6,
+        'n_heads': 8,
+        'd_ff': 2048,
+        'dropout': 0.1,
+        'factor': 1,
+        'activation': 'gelu',
+        'output_attention': False,
+        'embed': 'timeF',
+        'lradj': 'type1',
+        'use_multi_gpu': False,
+        'local_rank': 0,
+        'use_ims': False,
+        'patience': args.early_stop_patience  # Sync patience
+    }
+    
+    # Populate fixed params into args
+    for k, v in fixed_params.items():
+        setattr(args, k, v)
+    
+    # Handle GPU availability
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
     
-    print('Args in experiment:')
+    print('Cleaned Args in experiment:')
     print(args)
     
     exp = Exp_Sector_Finetune(args)

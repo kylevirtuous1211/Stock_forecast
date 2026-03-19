@@ -1,0 +1,21 @@
+# Core dependencies
+alpaca-py>=0.30.0
+pandas>=2.0.0
+numpy<2.0.0
+python-dotenv>=1.0.0
+torch>=2.0.0
+scikit-learn>=1.3.0
+matplotlib
+huggingface_hub
+safetensors
+transformers
+einops
+scipy
+sktime
+NeuralForecast
+sqlalchemy
+fastapi
+uvicorn
+reformer-pytorch
+patool
+sympy
